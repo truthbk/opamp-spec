@@ -290,6 +290,18 @@ enum ServerCapabilities {
     // Status: [Development]
     ServerCapabilities_AcceptsConnectionSettingsRequest = 0x00000040;
 
+    // The Server signs remote configurations using ECDSA P-256 + SHA-256.
+    // The signature is placed in AgentRemoteConfig.signature and the signing
+    // certificate chain in AgentRemoteConfig.signing_cert_chain.
+    // Status: [Development]
+    ServerCapabilities_SignsRemoteConfig = 0x00000080;
+
+    // The Server signs downloadable package files using ECDSA P-256 + SHA-256.
+    // The signature is placed in DownloadableFile.signature and the signing
+    // certificate chain in DownloadableFile.signing_cert_chain.
+    // Status: [Development]
+    ServerCapabilities_SignsPackages = 0x00000100;
+
     // Add new capabilities here, continuing with the least significant unused bit.
 }
 
@@ -620,12 +632,13 @@ message DownloadableFile {
     // was downloaded correctly.
     bytes content_hash = 2;
 
-    // Optional signature of the file content. Can be used by the Agent to verify the
-    // authenticity of the downloaded file, for example can be the
-    // [detached GPG signature](https://www.gnupg.org/gph/en/manual/x135.html#AEN160).
-    // The exact signing and verification method is Agent specific. See
-    // https://github.com/open-telemetry/opamp-spec/blob/main/specification.md#code-signing
-    // for recommendations.
+    // Optional DER-encoded ECDSA P-256 signature over SHA-256 of the raw
+    // downloaded file content bytes.
+    // When the Server has the SignsPackages capability, this field MUST be
+    // present. Agents with the VerifiesPackageSignatures capability MUST
+    // verify this field before installing the package and MUST set
+    // PackageStatus.status = InstallFailed if verification fails.
+    // Status: [Development]
     bytes signature = 3;
 
     // Optional headers to use when downloading a file. Typically used to set
@@ -635,6 +648,12 @@ message DownloadableFile {
     // key="Authorization", Value="Basic YWxhZGRpbjpvcGVuc2VzYW1l".
     // Status: [Development]
     Headers headers = 4;
+
+    // PEM bundle of the signing certificate chain used to produce `signature`.
+    // Leaf certificate first, then intermediates (root CA not required).
+    // Present when `signature` is present.
+    // Status: [Development]
+    bytes signing_cert_chain = 5;
 }
 
 message ServerErrorResponse {
@@ -781,6 +800,23 @@ enum AgentCapabilities {
     // The agent will report ConnectionSettingsOffers status via AgentToServer.connection_settings_status field.
     // Status: [Development]
     AgentCapabilities_ReportsConnectionSettingsStatus = 0x00008000;
+
+    // The Agent will verify X.509 signatures on received AgentRemoteConfig messages.
+    // If set, configs with a missing or invalid signature are hard-rejected: the
+    // Agent sets RemoteConfigStatus.status = FAILED and does not apply the config.
+    // Requires the Server to have the SignsRemoteConfig capability for configs to
+    // be accepted.
+    // Status: [Development]
+    AgentCapabilities_VerifiesRemoteConfigSignature = 0x00010000;
+
+    // The Agent will verify X.509 signatures on received DownloadableFile messages.
+    // If set, packages with a missing or invalid signature are hard-rejected: the
+    // Agent sets PackageStatus.status = InstallFailed and does not install the
+    // package. Requires the Server to have the SignsPackages capability for
+    // packages to be accepted.
+    // Status: [Development]
+    AgentCapabilities_VerifiesPackageSignatures = 0x00020000;
+
     // Add new capabilities here, continuing with the least significant unused bit.
 }
 
@@ -1027,6 +1063,21 @@ message AgentRemoteConfig {
     // Management Server must choose a hashing function that guarantees lack of hash
     // collisions in practice.
     bytes config_hash = 2;
+
+    // Optional DER-encoded ECDSA P-256 signature over SHA-256 of the canonical
+    // signed payload (see specification for payload construction).
+    // Present when the Server has the SignsRemoteConfig capability.
+    // Agents with the VerifiesRemoteConfigSignature capability MUST verify this
+    // field and MUST reject the config if verification fails, setting
+    // RemoteConfigStatus.status = FAILED.
+    // Status: [Development]
+    bytes signature = 3;
+
+    // PEM bundle of the signing certificate chain used to produce `signature`.
+    // Leaf certificate first, then intermediates (root CA not required).
+    // Present when `signature` is present.
+    // Status: [Development]
+    bytes signing_cert_chain = 4;
 }
 
 message AgentConfigMap {

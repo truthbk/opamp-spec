@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+* Add X.509 signing extension for remote configurations and package files
+  ([Development] status):
+  * New `AgentRemoteConfig.signature` and `AgentRemoteConfig.signing_cert_chain`
+    fields (proto field numbers 3 and 4).
+  * New `DownloadableFile.signing_cert_chain` field (proto field number 5).
+    Existing `DownloadableFile.signature` field formalised to carry a
+    DER-encoded ECDSA P-256 signature.
+  * New `ServerCapabilities_SignsRemoteConfig = 0x00000080` and
+    `ServerCapabilities_SignsPackages = 0x00000100`.
+  * New `AgentCapabilities_VerifiesRemoteConfigSignature = 0x00010000` and
+    `AgentCapabilities_VerifiesPackageSignatures = 0x00020000`.
+  * New [X.509 Signing](#x509-signing) section in the specification describing the
+    ECDSA P-256 + SHA-256 algorithm, certificate chain requirements, capability
+    negotiation semantics, and hard-reject policy.
+
 ## v0.16.0
 
 * Allow unchanged status fields to be omitted on websocket reconnect by @andykellr in https://github.com/open-telemetry/opamp-spec/pull/290

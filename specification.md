@@ -154,6 +154,10 @@ Status: [Beta]
     + [Configuration Files](#configuration-files)
     + [Security Considerations](#security-considerations)
     + [AgentRemoteConfig Message](#agentremoteconfig-message)
+      - [AgentRemoteConfig.config](#agentremoteconfigconfig)
+      - [AgentRemoteConfig.config_hash](#agentremoteconfigconfig_hash)
+      - [AgentRemoteConfig.signature](#agentremoteconfigsignature)
+      - [AgentRemoteConfig.signing_cert_chain](#agentremoteconfigsigning_cert_chain)
   * [Packages](#packages)
     + [Downloading Packages](#downloading-packages)
       - [Step 1](#step-1)
@@ -178,6 +182,7 @@ Status: [Beta]
       - [DownloadableFile.content_hash](#downloadablefilecontent_hash)
       - [DownloadableFile.signature](#downloadablefilesignature)
       - [DownloadableFile.headers](#downloadablefileheaders)
+      - [DownloadableFile.signing_cert_chain](#downloadablefilesigning_cert_chain)
   * [Custom Messages](#custom-messages)
     + [Motivation](#motivation)
     + [CustomCapabilities](#customcapabilities)
@@ -653,6 +658,16 @@ enum AgentCapabilities {
     // Status: [Development]
     ReportsConnectionSettingsStatus = 0x00008000;
 
+    // The Agent will verify X.509 signatures on received AgentRemoteConfig messages.
+    // If set, configs with a missing or invalid signature are hard-rejected.
+    // Status: [Development]
+    VerifiesRemoteConfigSignature = 0x00010000;
+
+    // The Agent will verify X.509 signatures on received DownloadableFile messages.
+    // If set, packages with a missing or invalid signature are hard-rejected.
+    // Status: [Development]
+    VerifiesPackageSignatures = 0x00020000;
+
     // Add new capabilities here, continuing with the least significant unused bit.
 }
 ```
@@ -913,6 +928,14 @@ enum ServerCapabilities {
     // The Server can accept ConnectionSettingsRequest and respond with an offer.
     // Status: [Development]
     AcceptsConnectionSettingsRequest = 0x00000040;
+
+    // The Server signs remote configurations using ECDSA P-256 + SHA-256.
+    // Status: [Development]
+    SignsRemoteConfig = 0x00000080;
+
+    // The Server signs downloadable package files using ECDSA P-256 + SHA-256.
+    // Status: [Development]
+    SignsPackages = 0x00000100;
 
     // Add new capabilities here, continuing with the least significant unused bit.
 }
@@ -2595,8 +2618,54 @@ The message has the following structure:
 message AgentRemoteConfig {
   AgentConfigMap config = 1;
   bytes config_hash = 2;
+  bytes signature = 3;         // Status: [Development]
+  bytes signing_cert_chain = 4; // Status: [Development]
 }
 ```
+
+##### AgentRemoteConfig.config
+
+The Agent config offered by the management Server to the Agent instance. SHOULD NOT
+be set if the config for this Agent has not changed since it was last requested.
+
+##### AgentRemoteConfig.config_hash
+
+Hash of the `config` field. The Agent SHOULD include this value in subsequent
+`RemoteConfigStatus` messages in the `last_remote_config_hash` field. This allows
+the management Server to identify that a new config is available for the Agent.
+
+This field MUST be always set if the management Server supports remote configuration
+of agents.
+
+##### AgentRemoteConfig.signature
+
+Status: [Development]
+
+Optional DER-encoded ECDSA P-256 signature over SHA-256 of the canonical signed
+payload. The signed payload is constructed as:
+
+```
+signed_bytes = 4-byte-big-endian-len(marshal(config)) || marshal(config) || config_hash
+```
+
+where `marshal` is a deterministic proto serialisation of the `config`
+(`AgentConfigMap`) field, and `||` denotes concatenation. The 4-byte length prefix
+unambiguously delimits the two fields, preventing length-confusion attacks.
+
+Present when the Server has the `SignsRemoteConfig` capability.
+
+Agents with the `VerifiesRemoteConfigSignature` capability MUST verify this field and
+MUST reject the config if verification fails (see
+[Hard Reject Policy](#x509-signing-hard-reject-policy)).
+
+##### AgentRemoteConfig.signing_cert_chain
+
+Status: [Development]
+
+PEM bundle containing the signing certificate chain used to produce `signature`. The
+leaf certificate appears first, followed by any intermediates in order toward the
+root. The root CA itself is not required in the bundle. Present when `signature` is
+present.
 
 ### Packages
 
@@ -2888,8 +2957,9 @@ The message has the following structure:
 message DownloadableFile {
     string download_url = 1;
     bytes content_hash = 2;
-    bytes signature = 3;
-    Headers headers = 4; // Status: [Development]
+    bytes signature = 3;          // Status: [Development]
+    Headers headers = 4;          // Status: [Development]
+    bytes signing_cert_chain = 5; // Status: [Development]
 }
 ```
 
@@ -2906,11 +2976,18 @@ was downloaded correctly.
 
 ##### DownloadableFile.signature
 
-Optional signature of the file content. Can be used by the Agent to verify the
-authenticity of the downloaded file, for example can be the
-[detached GPG signature](https://www.gnupg.org/gph/en/manual/x135.html#AEN160).
-The exact signing and verification method is Agent specific. See
-[Code Signing](#code-signing) for recommendations.
+Status: [Development]
+
+Optional DER-encoded ECDSA P-256 signature over SHA-256 of the raw downloaded file
+content bytes (as downloaded from `download_url`).
+
+When the Server has the `SignsPackages` capability, this field MUST be present.
+Agents with the `VerifiesPackageSignatures` capability MUST verify this field before
+installing the package and MUST set `PackageStatus.status = InstallFailed` if
+verification fails (see [Hard Reject Policy](#x509-signing-hard-reject-policy)).
+
+See [X.509 Signing](#x509-signing) for the full signing scheme and certificate
+chain requirements.
 
 ##### DownloadableFile.headers
 
@@ -2921,6 +2998,15 @@ tokens or other authorization headers. For HTTP-based protocols the Agent
 should set these in the request headers.
 For example:
 key="Authorization", Value="Basic YWxhZGRpbjpvcGVuc2VzYW1l".
+
+##### DownloadableFile.signing_cert_chain
+
+Status: [Development]
+
+PEM bundle containing the signing certificate chain used to produce `signature`. The
+leaf certificate appears first, followed by any intermediates in order toward the
+root. The root CA itself is not required in the bundle. Present when `signature` is
+present.
 
 ### Custom Messages
 
@@ -3536,26 +3622,106 @@ Agent by default. The capabilities should be opt-in by the user.
 
 ### Code Signing
 
-Any executable code that is part of a package should be signed
-to prevent a compromised Server from delivering malicious code to the Agent. We
-recommend the following:
+Any executable code that is part of a package should be signed to prevent a
+compromised Server from delivering malicious code to the Agent. We recommend the
+following:
 
-* Any downloadable executable code (e.g. executable packages)
-  need to be code-signed. The actual code-signing and verification mechanism is
-  Agent specific and is outside the concerns of the OpAMP specification.
+* Any downloadable executable code (e.g. executable packages) should be
+  code-signed. OpAMP provides a standard X.509/ECDSA signing mechanism (see
+  [X.509 Signing](#x509-signing) below). Agents that require verified downloads
+  SHOULD declare the `VerifiesPackageSignatures` capability.
 * The Agent should verify executable code in downloaded files to ensure the code
   signature is valid.
-* The downloadable code can be signed with the signature included in the file content or
-  have a detached signature recorded in the DownloadableFile
-  message's [signature](#downloadablefilesignature) field. Detached signatures may be used
-  for example with [GPG signing](https://www.gnupg.org/gph/en/manual/x135.html#AEN160).
-* If Certificate Authority is used for code signing it is recommended that the
+* If a Certificate Authority is used for code signing it is recommended that the
   Certificate Authority and its private key is not co-located with the OpAMP
   Server, so that a compromised Server cannot sign malicious code.
 * The Agent should run any downloaded executable code (the packages and or any
   code that it runs as external processes) at the minimum possible privilege to
   prevent the code from accessing sensitive files or perform high privilege
   operations. The Agent should not run downloaded code as root user.
+
+### X.509 Signing
+
+Status: [Development]
+
+OpAMP provides a standard cryptographic signing mechanism for both remote
+configurations and package files. The mechanism is based on X.509 certificates and
+ECDSA P-256 signatures, enabling interoperable signing and verification across
+implementations.
+
+#### Algorithm
+
+* **Key type**: ECDSA P-256 (prime256v1 / secp256r1)
+* **Hash**: SHA-256
+* **Signature format**: DER-encoded ECDSA signature as per RFC 5480
+* **Certificate chain format**: PEM bundle (leaf certificate first, followed by
+  intermediate certificates in order toward the root; root CA not required)
+
+#### X.509 Signing Capability Negotiation
+
+Four new capability bits govern signing behaviour:
+
+| Capability | Side | Value | Meaning |
+|---|---|---|---|
+| `SignsRemoteConfig` | Server | `0x00000080` | Server signs `AgentRemoteConfig` messages |
+| `SignsPackages` | Server | `0x00000100` | Server signs `DownloadableFile` messages |
+| `VerifiesRemoteConfigSignature` | Agent | `0x00010000` | Agent requires signed configs; rejects unsigned ones |
+| `VerifiesPackageSignatures` | Agent | `0x00020000` | Agent requires signed packages; rejects unsigned ones |
+
+The table below defines expected behaviour for each combination of remote config
+signing capabilities (the same matrix applies to packages):
+
+| Server `SignsRemoteConfig` | Agent `VerifiesRemoteConfigSignature` | Behaviour |
+|---|---|---|
+| No | No | Config sent and applied as before. No change. |
+| Yes | No | Server populates `signature` and `signing_cert_chain`; Agent ignores them. Config applied normally. |
+| No | Yes | Server does not populate `signature`. Agent detects missing signature, sets `RemoteConfigStatus.status = FAILED`. Config NOT applied. |
+| Yes | Yes | Server signs. Agent verifies. On success: config applied. On failure: `RemoteConfigStatus.status = FAILED`. Config NOT applied. |
+
+#### X.509 Signing Certificate Chain Requirements
+
+The signing certificate (leaf) MUST satisfy all of the following:
+
+1. **Extended Key Usage (EKU)**: MUST include `id-kp-codeSigning`
+   (OID `1.3.6.1.5.5.7.3.3`).
+2. **Validity**: `NotBefore ≤ time_of_receipt ≤ NotAfter`. Expired certificates
+   MUST be rejected.
+3. **Chain of trust**: MUST chain to a CA certificate present in the Agent's
+   configured trust anchor pool.
+
+It is RECOMMENDED that signing certificates have short validity periods (e.g.
+≤ 24 hours) to limit the window of exposure in the event of a key compromise.
+
+#### X.509 Signing Hard Reject Policy
+
+An Agent that declares `VerifiesRemoteConfigSignature` or
+`VerifiesPackageSignatures` MUST reject any configuration or package that does not
+carry a valid signature. Rejection means:
+
+* **Remote config**: The Agent sets `RemoteConfigStatus.status = FAILED` and
+  `RemoteConfigStatus.error_message` to a human-readable description of the
+  failure. `RemoteConfigStatus.last_remote_config_hash` MUST be set to the hash of
+  the rejected config (not the previously applied config) so the Server can
+  identify which version was rejected and avoid an infinite resend loop. The
+  Agent's `OnMessage` callback MUST NOT be invoked with the rejected config.
+* **Package**: The Agent sets `PackageStatus.status = InstallFailed` and
+  `PackageStatus.error_message` to a human-readable description of the failure.
+  The package content MUST NOT be written to local storage.
+
+Soft acceptance (warn-and-apply) is explicitly disallowed. An Agent that declares a
+verification capability MUST be able to guarantee that it never applies an unsigned
+or invalidly-signed payload.
+
+#### Out of Scope (v1)
+
+The following are intentionally excluded from this version:
+
+* **Certificate Revocation Lists (CRL) and OCSP**: Revocation checking is not
+  performed. Operators SHOULD use short-lived certificates to bound exposure.
+* **RSA signing**: Only ECDSA P-256 is specified in this version.
+* **Trust-On-First-Use (TOFU)**: The trust anchor pool MUST be pre-configured by
+  the operator.
+* **Multiple signers**: Each payload is signed by exactly one key.
 
 ## Interoperability
 
