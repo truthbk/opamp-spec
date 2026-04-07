@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+* Add X.509 signing extension for remote configurations and package files
+  ([Development] status):
+  * New `AgentRemoteConfig.signature` and `AgentRemoteConfig.signing_cert_chain`
+    fields (proto field numbers 3 and 4).
+  * New `DownloadableFile.signing_cert_chain` field (proto field number 5).
+    Existing `DownloadableFile.signature` field formalised to carry a
+    standard digital signature whose algorithm is determined by the
+    signing certificate.
+  * New `ServerCapabilities_SignsRemoteConfig = 0x00000080` and
+    `ServerCapabilities_SignsPackages = 0x00000100`.
+  * New `AgentCapabilities_VerifiesRemoteConfigSignature = 0x00010000` and
+    `AgentCapabilities_VerifiesPackageSignatures = 0x00020000`.
+  * New [X.509 Signing](specification.md#x509-signing) section in the
+    specification with an algorithm-agile signature policy (algorithm
+    determined by the signing certificate; recommended baseline covers
+    ECDSA P-256/P-384, RSA-2048+ PKCS#1 v1.5, and Ed25519), full
+    RFC 5280 certificate chain validation requirements (leaf and
+    intermediates), capability negotiation semantics, recommended
+    revocation checking, and hard-reject policy.
+
 ## v0.17.0
 
 * Fix typos in TLS version comments by @Kielek in https://github.com/open-telemetry/opamp-spec/pull/316
