@@ -17,6 +17,29 @@
     ECDSA P-256 + SHA-256 algorithm, certificate chain requirements, capability
     negotiation semantics, and hard-reject policy.
 
+## v0.18.0
+
+* Fix OpAMP port in example by @tigrannajaryan in https://github.com/open-telemetry/opamp-spec/pull/331
+* Fix max_version field comment in proto by @RassK in https://github.com/open-telemetry/opamp-spec/pull/336
+* Include version in package name by @RassK in https://github.com/open-telemetry/opamp-spec/pull/251
+* Add namespace for C# by @RassK in https://github.com/open-telemetry/opamp-spec/pull/243
+
+### New Contributors
+* @RassK made their first contribution in https://github.com/open-telemetry/opamp-spec/pull/336
+
+**Full Changelog**: https://github.com/open-telemetry/opamp-spec/compare/v0.17.0...v0.18.0
+
+## v0.17.0
+
+* Fix typos in TLS version comments by @Kielek in https://github.com/open-telemetry/opamp-spec/pull/316
+* Add OpenTelemetry guidelines doc by @breedx-splk in https://github.com/open-telemetry/opamp-spec/pull/312
+* Move Otel Collector guidelines from to opentelemetry-guidelines.md by @tigrannajaryan in https://github.com/open-telemetry/opamp-spec/pull/318
+* Add Duplicate instance_uid detection section by @michel-laterman in https://github.com/open-telemetry/opamp-spec/pull/314
+* Declare default OpAMP port by @dmitryax in https://github.com/open-telemetry/opamp-spec/pull/323
+* Document HTTP OpAMP routing through the Collector by @dmitryax in https://github.com/open-telemetry/opamp-spec/pull/322
+
+**Full Changelog**: https://github.com/open-telemetry/opamp-spec/compare/v0.16.0...v0.17.0
+
 ## v0.16.0
 
 * Allow unchanged status fields to be omitted on websocket reconnect by @andykellr in https://github.com/open-telemetry/opamp-spec/pull/290

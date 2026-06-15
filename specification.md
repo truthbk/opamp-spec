@@ -17,14 +17,16 @@ Status: [Beta]
 <details>
 <summary>Table of Contents</summary>
 
-<!-- toc -->
+<!-- START doctoc -->
 
 - [Introduction](#introduction)
 - [Communication Model](#communication-model)
   * [WebSocket Transport](#websocket-transport)
     + [WebSocket Message Format](#websocket-message-format)
+    + [WebSocket Message Size Limits](#websocket-message-size-limits)
     + [WebSocket Message Exchange](#websocket-message-exchange)
   * [Plain HTTP Transport](#plain-http-transport)
+    + [Plain HTTP Message Size Limits](#plain-http-message-size-limits)
   * [AgentToServer and ServerToAgent Messages](#agenttoserver-and-servertoagent-messages)
     + [AgentToServer Message](#agenttoserver-message)
       - [AgentToServer.instance_uid](#agenttoserverinstance_uid)
@@ -140,7 +142,7 @@ Status: [Beta]
       - [TLSConnectionSettings.insecure_skip_verify](#tlsconnectionsettingsinsecure_skip_verify)
       - [TLSConnectionSettings.min_version](#tlsconnectionsettingsmin_version)
       - [TLSConnectionSettings.max_version](#tlsconnectionsettingsmax_version)
-      - [TLSConnectionSettings.ciper_suites](#tlsconnectionsettingsciper_suites)
+      - [TLSConnectionSettings.cipher_suites](#tlsconnectionsettingscipher_suites)
     + [ProxyConnectionSettings Message](#proxyconnectionsettings-message)
       - [ProxyConnectionSettings.url](#proxyconnectionsettingsurl)
       - [ProxyConnectionSettings.connect_headers](#proxyconnectionsettingsconnect_headers)
@@ -218,6 +220,7 @@ Status: [Beta]
     + [Plain HTTP Transport](#plain-http-transport-1)
   * [Restoring WebSocket Connection](#restoring-websocket-connection)
   * [Duplicate WebSocket Connections](#duplicate-websocket-connections)
+  * [Duplicate instance_uid Detection](#duplicate-instance_uid-detection)
   * [Authentication](#authentication)
   * [Bad Request](#bad-request)
   * [Retrying Messages](#retrying-messages)
@@ -243,7 +246,7 @@ Status: [Beta]
   * [Cloud Provider Support](#cloud-provider-support)
   * [Other](#other)
 
-<!-- tocstop -->
+<!-- END doctoc -->
 
 </details>
 
@@ -330,6 +333,9 @@ the Agent (via the Client) to the Server and from the Server to the Agent.
 
 The default URL path for the connection is /v1/opamp. The URL path MAY be
 configurable on the Client and on the Server.
+
+The default port for OpAMP endpoints is 4320. OpAMP Server implementations SHOULD
+listen on this port by default.
 
 One of the typical ways to implement OpAMP on the Agent side is by having a helping
 Supervisor process, which controls the Agent process. The Supervisor is also
@@ -423,6 +429,39 @@ in bytes.
 Note that due to the way Protobuf wire format is designed the size of the `data` in
 bytes can be 0 if the encoded AgentToServer or ServerToAgent message is empty (i.e. all
 fields are unset). This is a valid situation.
+
+#### WebSocket Message Size Limits
+
+All WebSocket message size limits in this section apply to the complete OpAMP
+WebSocket message, including both `header` and `data`. It is RECOMMENDED to use
+64 MiB as the default limit for each limit in this section. Implementations
+SHOULD allow these limits to be configured.
+
+The Server MUST enforce a size limit when receiving OpAMP WebSocket messages
+that contain AgentToServer messages, including after any WebSocket extension
+decompression, to mitigate possible excessive memory allocation caused by a
+misconfigured or malicious Client sending an oversized message. If the limit is
+exceeded, the Server MUST treat the message as malformed and SHOULD close the
+WebSocket connection with status code 1009 (Message Too Big).
+
+The Client MUST enforce a size limit when receiving OpAMP WebSocket messages
+that contain ServerToAgent messages, including after any WebSocket extension
+decompression, to mitigate possible excessive memory allocation caused by a
+misconfigured or malicious Server sending an oversized message. If the limit is
+exceeded, the Client MUST treat the message as malformed and SHOULD close the
+WebSocket connection with status code 1009 (Message Too Big).
+
+The Server MUST limit the size of OpAMP WebSocket messages that contain
+ServerToAgent messages before sending them, including before any WebSocket
+extension compression, to avoid overwhelming the Client. If the limit is
+exceeded, the Server MUST NOT send the message and SHOULD record the fact that
+the message was discarded.
+
+The Client SHOULD limit the size of OpAMP WebSocket messages that contain
+AgentToServer messages before sending them, including before any WebSocket
+extension compression, to avoid overwhelming the Server. If the limit is
+exceeded, the Client MUST NOT send the message and SHOULD record the fact that
+the message was discarded.
 
 #### WebSocket Message Exchange
 
@@ -524,6 +563,36 @@ message.
 
 The Server SHOULD compress the response if the Client indicated it can accept compressed
 response via the "Accept-Encoding" header.
+
+#### Plain HTTP Message Size Limits
+
+All plain HTTP message size limits in this section apply to the complete HTTP
+request or response body. It is RECOMMENDED to use 64 MiB as the default limit
+for each limit in this section. Implementations SHOULD allow these limits to be
+configured.
+
+The Server MUST enforce a size limit when receiving HTTP request bodies,
+including after decompression, to mitigate possible excessive memory allocation
+caused by a misconfigured or malicious Client sending an oversized request. If
+the limit is exceeded, the Server MUST respond with `HTTP 413 Content Too
+Large`, after which the Client MUST NOT retry the same request.
+
+The Client MUST enforce a size limit when receiving HTTP response bodies,
+including after decompression, to mitigate possible excessive memory allocation
+caused by a misconfigured or malicious Server sending an oversized response. If
+the limit is exceeded, the Client MUST treat the response as failed, MUST NOT
+process the oversized response body, and SHOULD record the fact that the
+response was discarded.
+
+The Server MUST limit the size of HTTP response bodies before sending them,
+including before compression, to avoid overwhelming the Client. If the limit is
+exceeded, the Server MUST NOT send the oversized response body and SHOULD record
+the fact that the response was discarded.
+
+The Client SHOULD limit the size of HTTP request bodies before sending them,
+including before compression, to avoid overwhelming the Server. If the limit is
+exceeded, the Client MUST NOT make the request and SHOULD record the fact that
+the request was discarded.
 
 ### AgentToServer and ServerToAgent Messages
 
@@ -764,7 +833,7 @@ See [AvailableComponents](#availablecomponents-message) message for details.
 
 Status: [Development]
 
-The status of the connection settings that was previously recieved from the
+The status of the connection settings that was previously received from the
 Server. See [ConnectionSettingsStatus](#connectionsettingsstatus-message)
 message for details. This field SHOULD be unset if this information is unchanged
 since the last AgentToServer message. This field is a part of the
@@ -1227,18 +1296,6 @@ Attributes that identify the Agent.
 Keys/values are according to OpenTelemetry [resource semantic
 conventions](https://opentelemetry.io/docs/specs/semconv/resource/).
 
-For standalone running Agents (such as OpenTelemetry Collector) the following
-attributes SHOULD be specified:
-
-- service.name should be set to the same value that the Agent uses in its own telemetry.
-- service.namespace if it is used in the environment where the Agent runs.
-- service.version should be set to version number of the Agent build.
-- service.instance.id should be set. It may be set equal to the Agent's
-  instance uid (equal to ServerToAgent.instance_uid field) or any other value
-  that uniquely identifies the Agent in combination with other attributes.
-- any other attributes that are necessary for uniquely identifying the Agent's
-  own telemetry.
-
 The Agent SHOULD also include these attributes in the Resource of its own
 telemetry. The combination of identifying attributes SHOULD be sufficient to
 uniquely identify the Agent's own telemetry in the destination system to which
@@ -1249,9 +1306,9 @@ the Agent sends its own telemetry.
 Attributes that do not necessarily identify the Agent but help describe where it
 runs.
 
-The following attributes SHOULD be included:
+Here are some examples of attributes that may be a good fit for non-identifying attributes:
 
-- os.type, os.version - to describe where the Agent runs.
+- os.\* to describe where the Agent runs.
 - host.\* to describe the host the Agent runs on.
 - cloud.\* to describe the cloud where the host is located.
 - any other relevant Resource attributes that describe this Agent and the
@@ -1382,7 +1439,7 @@ message ConnectionSettingsStatus {
         // Agent is currently applying the offered connection settings that it received earlier.
         APPLYING = 2;
 
-        // Agent tried to apply the offered connection settings recieved earlier, but it failed.
+        // Agent tried to apply the offered connection settings received earlier, but it failed.
         // See error_message for more details.
         FAILED = 3;
     }
@@ -1550,7 +1607,7 @@ An error message if the status is erroneous.
 
 Status: [Development]
 
-The download_details contains additional details that descibe a package download.
+The download_details contains additional details that describe a package download.
 It should only be set if the status is `DOWNLOADING`.
 
 ```protobuf
@@ -2034,7 +2091,7 @@ message OpAMPConnectionSettings {
 ##### OpAMPConnectionSettings.destination_endpoint
 
 OpAMP Server URL This MUST be a WebSocket or HTTP URL and MUST be non-empty, for
-example, `wss://example.com:4318/v1/opamp`.
+example, `wss://example.com:4320/v1/opamp`.
 
 ##### OpAMPConnectionSettings.headers
 
@@ -2283,7 +2340,7 @@ This sets the minimum supported TLS version the client will use. For example:
 This sets the maximum supported TLS version the client will use. For example:
 `1.2`, `TLSv1.2`.
 
-##### TLSConnectionSettings.ciper_suites
+##### TLSConnectionSettings.cipher_suites
 
 This sets the supported cipher suites that may be used by the connection. For
 example: `TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA`.
@@ -3451,6 +3508,18 @@ when Agents are using bad UID generators or due to cloning of the VMs where the
 Agent runs). When a duplicate `instance_uid` is detected, Server SHOULD generate
 a new `instance_uid`, and send it as `new_instance_uid` value of AgentIdentification.
 
+### Duplicate instance_uid Detection
+
+A server may be able to detect agents connecting with duplicate `instance_uid` values.
+Detection mechanisms are implementation specific.
+Duplicate detection is desirable in instances where the server seeks to protect against
+`instance_uid` reuse or impersonation.
+
+If this occurs, the Server MAY disconnect or deny serving requests from duplicate
+instances.
+The Server SHOULD generate a new `instance_uid`, and send it as the `new_instance_uid`
+value of AgentIdentification of the `ServerToAgent` response.
+
 ### Authentication
 
 Status: [Beta]
@@ -3789,8 +3858,8 @@ the new capabilities.
 
 #### Protobuf Schema Stability
 
-The specification provides the follow stability guarantees of the
-[Protobuf definitions](proto/opamp.proto) for OpAMP 1.0:
+The specification provides the following stability guarantees of the
+[Protobuf definitions](proto/opamp/v1/opamp.proto) for OpAMP 1.0:
 
 - Field types, numbers and names will not change.
 - Names of messages and enums will not change.

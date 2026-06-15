@@ -4,6 +4,8 @@ This repository contains Open Agent Management Protocol (OpAMP)
 [specification](specification.md) and Protobuf definitions in [proto](proto) directory.
 
 See [releases here](https://github.com/open-telemetry/opamp-spec/releases) and [changelog here](CHANGELOG.md).
+Additional standalone guidance for instrumentation runtimes is in
+[opentelemetry-guidelines.md](opentelemetry-guidelines.md).
 
 ## Contributing
 
@@ -65,6 +67,7 @@ For more information about the emeritus role, see the [community repository](htt
 ### Libraries
 
 - [OpAMP Go](https://github.com/open-telemetry/opamp-go)
+- [OpAMP .NET Client](https://github.com/open-telemetry/opentelemetry-dotnet-contrib/tree/main/src/OpenTelemetry.OpAmp.Client)
 
 ### Agent Management Platforms
 
